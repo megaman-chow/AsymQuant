@@ -1,0 +1,65 @@
+const config = require("./config");
+const { connect } = require("./exchange/binance");
+const { createPool } = require("./traders/traderPool");
+const CandleEngine = require("./engine/candleEngine");
+const { computeIndicators } = require("./engine/indicatorEngine");
+const { evaluate } = require("./strategies/strategyV2");
+const { processTrader } = require("./engine/traderEngine");
+const { scoreTrader } = require("./engine/scoringEngine");
+
+// 1. Setup the Environment
+const engine = new CandleEngine();
+const traders = createPool(config.virtualTraders);
+const symbol = config.symbol;
+const timeframe = "1d";
+
+console.log(`🚀 Launching Trading Bot...`);
+console.log(`Monitoring: ${symbol} | Traders: ${traders.length}`);
+
+// 2. Start the Live Stream
+connect(symbol, timeframe, (candle) => {
+  // Update History
+  const history = engine.update(timeframe, candle);
+  
+  // Wait for enough history (need 50-100 candles for EMA/ATR stability)
+  if (history.length < 50) {
+    console.log(`Warming up engines... ${history.length}/50`);
+    return;
+  }
+
+  // 3. Compute Technicals
+  const indicators = computeIndicators(history);
+  
+  // 4. Run the Cycle for each Trader
+  for (const trader of traders) {
+    // Strategy Check (Signal & G-Factor)
+    const { signal, g } = evaluate(history, indicators, trader);
+
+    // Execution Logic (Position Sizing, TP/SL, Trailing)
+    processTrader(trader, signal, g, candle.close, indicators.atr);
+
+    // Update Rankings
+    scoreTrader(trader);
+  }
+
+  // 5. Render Leaderboard
+  renderDisplay(traders);
+});
+
+function renderDisplay(pool) {
+  const top = [...pool]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5);
+
+  console.clear();
+  console.log(`=== ${new Date().toLocaleTimeString()} | SYMBOL: ${symbol} ===`);
+  console.table(top.map(t => ({
+    ID: t.id,
+    Balance: t.balance.toFixed(2),
+    "Win%": `${((t.wins / (t.wins + t.losses || 1)) * 100).toFixed(1)}%`,
+    G_Threshold: t.gThreshold,
+    Invert: t.invert,
+    Score: t.score,
+    Status: t.openPosition ? `${t.openPosition.side} (G: ${t.openPosition.g.toFixed(2)})` : "IDLE"
+  })));
+}
