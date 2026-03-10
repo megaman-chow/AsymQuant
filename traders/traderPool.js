@@ -11,10 +11,10 @@ function rand(arr) {
  * Creates a trader with a unique genetic profile.
  * Traders are now "Timeframe Specialized" based on the global config.
  */
-function createTrader(id) {
+function createTrader(id, timeframe) {
   return {
     id,
-    balance: config.startingBalance,
+    balance: config.population.startingBalance,
     pnl: 0,
     wins: 0,
     losses: 0,
@@ -22,7 +22,7 @@ function createTrader(id) {
     score: 0,
 
     // Genetic DNA
-    timeframe: rand(config.timeframes), 
+    timeframe, 
     emaFast: rand([10, 20, 30]),
     emaSlow: rand([50, 100, 200]),
     gThreshold: rand([0.3, 0.4, 0.5, 0.6]),
@@ -37,9 +37,13 @@ function createTrader(id) {
  */
 function createPool(n) {
   const traders = [];
+  const timeframes = config.market.timeframes;
+
   for (let i = 0; i < n; i++) {
-    traders.push(createTrader(i));
+    const tf = timeframes[i % timeframes.length]; // round‑robin across all timeframes
+    traders.push(createTrader(i, tf));
   }
+
   return traders;
 }
 
