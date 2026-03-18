@@ -1,16 +1,16 @@
 const fs = require("fs");
-const config = require("./config");
-const { connect } = require("./exchange/binance");
+const config = require("../config");
+const { connect } = require("../exchange/binance");
 const { CandleEngine } = require("./engine/candleEngine");
-const { createPool } = require("./traders/traderPool");
+const { createPool } = require("../traders/traderPool");
 const { computeIndicators } = require("./engine/indicatorEngine");
-const { evaluate } = require("./strategies/strategyV2");
+const { evaluate } = require("../strategies/strategyV2");
 const { processTrader } = require("./engine/traderEngine");
 const { renderDashboard } = require("./engine/dashboard");
 const { evolve } = require("./engine/evolutionEngine");
 
 const candleEngine = new CandleEngine();
-let traders = createPool(config.virtualTraders);
+let traders = createPool(config.population.size);
 
 // Initialize CSV file with headers
 if (!fs.existsSync("equity_curve.csv")) {
@@ -19,7 +19,7 @@ if (!fs.existsSync("equity_curve.csv")) {
 
 // 1. Dashboard Loop (5s)
 setInterval(() => {
-  traders.forEach(t => t.score = (t.balance - 10000));
+  traders.forEach(t => t.score = (t.balance - config.population.startingBalance));
   renderDashboard(traders);
 }, 5000);
 
@@ -42,7 +42,8 @@ setInterval(() => {
 
 // 4. Data Processing Loop
 config.timeframes.forEach(tf => {
-  connect(config.symbol, tf, (timeframe, candle) => {
+config.market.timeframes.forEach(tf => {
+  connect(config.market.symbol, tf, (timeframe, candle) => {
     const history = candleEngine.update(timeframe, candle);
     if (history.length < 50) return;
 

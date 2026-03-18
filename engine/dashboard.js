@@ -33,9 +33,15 @@ function saveSnapshot(data) {
 
 function renderDashboard(traders) {
 
-  // Smooth terminal refresh
-  process.stdout.cursorTo(0, 0);
-  process.stdout.clearScreenDown();
+  // Smooth terminal refresh (only when running in a real TTY)
+  if (process.stdout && process.stdout.isTTY) {
+    if (typeof process.stdout.cursorTo === "function") {
+      process.stdout.cursorTo(0, 0);
+    }
+    if (typeof process.stdout.clearScreenDown === "function") {
+      process.stdout.clearScreenDown();
+    }
+  }
 
   const divider = "=".repeat(70);
 

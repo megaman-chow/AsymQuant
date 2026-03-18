@@ -2,6 +2,11 @@ const { computeTargets } = require("./riskEngine");
 const { updateTrailing } = require("./trailingEngine");
 
 function processTrader(trader, signal, g, price, atr) {
+  const events = {
+    opened: null,
+    closed: null
+  };
+
   // 1. OPEN POSITION
   if (signal && !trader.openPosition) {
     const { tp, sl } = computeTargets(price, atr, signal);
@@ -21,6 +26,15 @@ function processTrader(trader, signal, g, price, atr) {
 
     // Track for scoringEngine
     trader.totalG = (trader.totalG || 0) + g;
+
+    events.opened = {
+      side: signal,
+      entry: price,
+      tp,
+      sl,
+      size,
+      g
+    };
   }
 
   // 2. MANAGE OPEN POSITION
@@ -32,22 +46,32 @@ function processTrader(trader, signal, g, price, atr) {
 
     let isClosed = false;
     let pnl = 0;
+    let hit = null;
+    let exit = null;
 
     if (pos.side === "LONG") {
       if (price >= pos.tp) {
-        pnl = (pos.tp - pos.entry) / pos.entry * pos.size;
+        exit = pos.tp;
+        pnl = (exit - pos.entry) / pos.entry * pos.size;
         isClosed = true;
+        hit = "TP";
       } else if (price <= pos.sl) {
-        pnl = (pos.sl - pos.entry) / pos.entry * pos.size;
+        exit = pos.sl;
+        pnl = (exit - pos.entry) / pos.entry * pos.size;
         isClosed = true;
+        hit = "SL";
       }
     } else if (pos.side === "SHORT") {
       if (price <= pos.tp) {
-        pnl = (pos.entry - pos.tp) / pos.entry * pos.size;
+        exit = pos.tp;
+        pnl = (pos.entry - exit) / pos.entry * pos.size;
         isClosed = true;
+        hit = "TP";
       } else if (price >= pos.sl) {
-        pnl = (pos.entry - pos.sl) / pos.entry * pos.size;
+        exit = pos.sl;
+        pnl = (pos.entry - exit) / pos.entry * pos.size;
         isClosed = true;
+        hit = "SL";
       }
     }
 
@@ -59,8 +83,20 @@ function processTrader(trader, signal, g, price, atr) {
       else trader.losses++;
 
       trader.openPosition = null;
+
+      events.closed = {
+        side: pos.side,
+        entry: pos.entry,
+        exit,
+        hit,
+        size: pos.size,
+        g: pos.g,
+        pnl
+      };
     }
   }
+
+  return events;
 }
 
 module.exports = { processTrader };
