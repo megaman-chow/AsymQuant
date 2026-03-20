@@ -1,12 +1,21 @@
 {
   "name": "tradingbot",
   "version": "1.0.0",
-  "description": "",
+  "description": "Multi-timeframe genetic trading bot with Binance market data, Telegram controls, and optional Hyperliquid live execution.",
   "main": "bot.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node bot.js",
+    "check": "node --check bot.js",
+    "chat-id": "node getId.js",
+    "test": "echo \"No automated tests are configured yet.\""
   },
-  "keywords": [],
+  "keywords": [
+    "trading-bot",
+    "binance",
+    "hyperliquid",
+    "telegram",
+    "genetic-algorithm"
+  ],
   "author": "",
   "license": "ISC",
   "type": "commonjs",

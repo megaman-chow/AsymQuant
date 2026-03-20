@@ -15,6 +15,7 @@ env/
 # Logs
 logs/
 *.log
+engine/logs/
 
 # Data files
 data/
@@ -52,3 +53,11 @@ backtests/results/
 models/
 checkpoints/
 node_modules/
+
+# Node / trading bot runtime artifacts
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+traders_statement.json
+traders_status.json
+bot_runtime_state.json

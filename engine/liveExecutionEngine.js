@@ -5,6 +5,7 @@ const {
   getMid,
   setCrossLeverage,
   placeIocMarketLikeOrder,
+  fetchUserLiveSnapshot,
 } = require("../exchange/hyperliquid");
 
 function mustConfirmLiveTrading() {
@@ -37,10 +38,16 @@ async function createLiveExecutor() {
       onClosed: async () => {},
       setEnabled: async () => {},
       syncFromSim: async () => {},
+      testOpenLong: async () => {
+        throw new Error("Live trading not configured");
+      },
+      flattenLive: async () => {},
+      getLiveSnapshot: async () => null,
     };
   }
 
-  const { info, exchange, coin, asset, isTestnet } = await createHyperliquidClients();
+  const { info, exchange, coin, asset, isTestnet, szDecimals, walletAddress } =
+    await createHyperliquidClients();
 
   const leverage = Number(process.env.LIVE_LEVERAGE || 3);
   await setCrossLeverage(exchange, asset, leverage);
@@ -53,10 +60,42 @@ async function createLiveExecutor() {
     isTestnet,
     coin,
     asset,
+    walletAddress,
     havePosition: false,
     side: null, // "LONG" | "SHORT"
     sizeCoin: 0,
+    lastExchangeSnapshot: null,
+    lastExchangeSnapshotAt: null,
   };
+
+  const snapshotTtlMs = Math.max(5000, Number(process.env.LIVE_STATUS_TTL_MS || 15000));
+  const fillsLookbackMs = Math.max(
+    60 * 60 * 1000,
+    Number(process.env.LIVE_FILLS_LOOKBACK_MS || 24 * 60 * 60 * 1000)
+  );
+  const fillsLimit = Math.max(1, Math.min(50, Number(process.env.LIVE_FILLS_LIMIT || 10)));
+
+  async function getLiveSnapshot(force = false) {
+    const age = Date.now() - Number(state.lastExchangeSnapshotAt || 0);
+    if (!force && state.lastExchangeSnapshot && age < snapshotTtlMs) {
+      return state.lastExchangeSnapshot;
+    }
+
+    const snapshot = await fetchUserLiveSnapshot(info, walletAddress, coin, {
+      fillsLookbackMs,
+      fillsLimit,
+    });
+
+    state.lastExchangeSnapshot = snapshot;
+    state.lastExchangeSnapshotAt = snapshot.fetchedAt;
+
+    const livePos = snapshot?.currentPosition;
+    state.havePosition = !!(livePos && Math.abs(Number(livePos.size || 0)) > 0);
+    state.side = livePos ? livePos.side : null;
+    state.sizeCoin = livePos ? Math.abs(Number(livePos.size || 0)) : 0;
+
+    return snapshot;
+  }
 
   async function open(side /* LONG|SHORT */, g /* 0..1ish */) {
     if (!state.enabled) return;
@@ -71,7 +110,7 @@ async function createLiveExecutor() {
 
     const isBuy = side === "LONG";
     const cloid = makeCloid("open");
-    await placeIocMarketLikeOrder({
+    const { sizeCoin: filledSz } = await placeIocMarketLikeOrder({
       info,
       exchange,
       asset,
@@ -81,16 +120,18 @@ async function createLiveExecutor() {
       slippageBps,
       reduceOnly: false,
       cloid,
+      szDecimals,
     });
 
     state.havePosition = true;
     state.side = side;
-    state.sizeCoin = sizeCoin;
+    state.sizeCoin = filledSz;
+    await getLiveSnapshot(true).catch(() => {});
   }
 
-  async function close() {
-    if (!state.enabled) return;
+  async function close(forceDisarm = false) {
     if (!state.havePosition) return;
+    if (!forceDisarm && !state.enabled) return;
 
     const isBuy = state.side === "SHORT"; // close short by buying, close long by selling
     const cloid = makeCloid("close");
@@ -104,19 +145,62 @@ async function createLiveExecutor() {
       slippageBps,
       reduceOnly: true,
       cloid,
+      szDecimals,
     });
 
     state.havePosition = false;
     state.side = null;
     state.sizeCoin = 0;
+    await getLiveSnapshot(true).catch(() => {});
   }
 
   async function setEnabled(enabled) {
-    state.enabled = !!enabled;
-    if (!state.enabled) {
-      // Safety: when disarming, close any existing live position.
-      await close();
+    if (!enabled) {
+      await close(true);
     }
+    state.enabled = !!enabled;
+  }
+
+  async function flattenLive() {
+    await close(true);
+    await getLiveSnapshot(true).catch(() => {});
+  }
+
+  /**
+   * Open a small LONG immediately (IOC) to verify Hyperliquid wiring.
+   * Requires LIVE disarmed. Min ~$12 notional (HL floor ~$10).
+   */
+  async function testOpenLong() {
+    if (state.enabled) {
+      throw new Error("Turn LIVE OFF first (panel), then run test long.");
+    }
+    const testUsd = Math.max(
+      12,
+      Math.min(maxNotionalUsd, Number(process.env.TEST_LONG_USD || 12))
+    );
+    if (state.havePosition) {
+      await close(true);
+    }
+    const mid = await getMid(info, coin);
+    const sizeCoin = testUsd / mid;
+    const cloid = makeCloid("testlong");
+    const { sizeCoin: filledSz, price } = await placeIocMarketLikeOrder({
+      info,
+      exchange,
+      asset,
+      coin,
+      isBuy: true,
+      sizeCoin,
+      slippageBps,
+      reduceOnly: false,
+      cloid,
+      szDecimals,
+    });
+    state.havePosition = true;
+    state.side = "LONG";
+    state.sizeCoin = filledSz;
+    await getLiveSnapshot(true).catch(() => {});
+    return { coin, mid, limitPx: price, sizeCoin: filledSz, usd: testUsd };
   }
 
   /**
@@ -154,6 +238,9 @@ async function createLiveExecutor() {
     },
     setEnabled,
     syncFromSim,
+    testOpenLong,
+    flattenLive,
+    getLiveSnapshot,
   };
 }
 
